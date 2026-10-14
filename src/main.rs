@@ -11,7 +11,7 @@ use std::{
 use std::os::unix::process::CommandExt;
 
 use inquire::{
-    ui::{RenderConfig, Styled},
+    ui::{Color, RenderConfig, StyleSheet, Styled},
     Select,
 };
 use serde::Deserialize;
@@ -22,7 +22,6 @@ const CANDIDATES: &[&str] = &[
     "claude",
     "cursor-agent",
     "copilot",
-    "agy",
     "antigravity-cli",
 ];
 const BAR_WIDTH: usize = 18;
@@ -561,7 +560,7 @@ fn quota_for(
         "codex" => get_codex_quota()
             .map(QuotaStatus::Available)
             .unwrap_or(QuotaStatus::Unavailable),
-        "agy" | "antigravity-cli" => get_antigravity_quota(command)
+        "antigravity-cli" => get_antigravity_quota(command)
             .map(QuotaStatus::Breakdown)
             .unwrap_or(QuotaStatus::Unavailable),
         "claude" => get_claude_quota()
@@ -625,20 +624,10 @@ fn render_progress_line(name: &str, category: Option<&str>, percent: u8) -> Stri
 
 fn render_loading_label(name: &str, status: Option<&QuotaStatus>) -> String {
     match status {
-        None => format!("{name:<14} [{}] (Loading...)", "░".repeat(BAR_WIDTH)),
-        Some(QuotaStatus::Breakdown(pools)) => pools
-            .iter()
-            .enumerate()
-            .map(|(index, pool)| {
-                render_progress_line(
-                    if index == 0 { name } else { "" },
-                    Some(&pool.category),
-                    pool.remaining,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Some(status) => render_label(name, status),
+        // Reserve inquire's two-column selection prefix from the beginning so
+        // the loading and final-menu bars share the exact same left edge.
+        None => format!("  {name:<14} [{}] (Loading...)", "░".repeat(BAR_WIDTH)),
+        Some(status) => format!("  {}", render_label(name, status)),
     }
 }
 
@@ -684,8 +673,8 @@ impl std::fmt::Display for AgentChoice {
 
 fn main() -> ExitCode {
     // OpenRouter credentials do not establish quota for another provider.
-    // AGY and antigravity-cli are Google Antigravity clients, so do not map
-    // either of them here. The command using an OpenRouter key is explicit.
+    // Antigravity has its own quota source. The command using an OpenRouter
+    // key is explicit and never inferred from another provider's credentials.
     let openrouter_command = env::var("AGENT_OPENROUTER_COMMAND").ok();
     let commands: Vec<String> = CANDIDATES
         .iter()
@@ -754,7 +743,9 @@ fn main() -> ExitCode {
         })
         .collect();
 
-    let render_config = RenderConfig::default().with_canceled_prompt_indicator(Styled::new(""));
+    let render_config = RenderConfig::default()
+        .with_canceled_prompt_indicator(Styled::new(""))
+        .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey));
     let selected = match Select::new("Choose an Agent", choices)
         .with_render_config(render_config)
         .prompt()

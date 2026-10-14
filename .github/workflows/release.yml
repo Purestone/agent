@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+            extension: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            extension: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            extension: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            extension: zip
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXTENSION: ${{ matrix.extension }}
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          mkdir -p dist
+          binary="agent"
+          if [ "$RUNNER_OS" = "Windows" ]; then binary="agent.exe"; fi
+          archive="agent-${TARGET}.${EXTENSION}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "dist/${archive}" "target/${TARGET}/release/${binary}"
+          else
+            tar -C "target/${TARGET}/release" -czf "dist/${archive}" "$binary"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --generate-notes dist/*
